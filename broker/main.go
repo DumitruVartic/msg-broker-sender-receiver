@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 )
 
 const (
@@ -17,6 +18,8 @@ type Message struct {
 }
 
 var subscribers = make(map[string][]net.Conn) // Key: topic name, Value: slice of connections
+var messageBuffer = make(map[string][]string) // Buffer for messages per topic
+var mu sync.Mutex                             // Mutex for thread-safe access to messageBuffer
 
 func main() {
 	ln, err := net.Listen("tcp", PORT)
@@ -71,8 +74,14 @@ func handleConnection(conn net.Conn) {
 }
 
 func publishMessage(topic, content string) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	message := Message{Topic: topic, Content: content}
 	jsonData, _ := json.Marshal(message)
+
+	// Store the message in the buffer
+	messageBuffer[topic] = append(messageBuffer[topic], content)
 
 	// if there are subscribers for topic, send them mesage
 	if conns, found := subscribers[topic]; found {
@@ -84,6 +93,19 @@ func publishMessage(topic, content string) {
 }
 
 func subscribe(topic string, conn net.Conn) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	subscribers[topic] = append(subscribers[topic], conn)
 	fmt.Printf("Subscribed to topic \"%s\"\n", topic)
+
+	// If any buffered messages for topic
+	if messages, found := messageBuffer[topic]; found {
+		for _, msg := range messages { // send the message
+			msgData := Message{Topic: topic, Content: msg}
+			jsonData, _ := json.Marshal(msgData)
+			conn.Write(jsonData)
+		}
+		delete(messageBuffer, topic) // clear buffer after send
+	}
 }
