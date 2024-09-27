@@ -5,7 +5,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 )
 
 const PORT = ":65432"
@@ -31,6 +34,16 @@ func main() {
 		return
 	}
 	defer ln.Close()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-signalChan
+		fmt.Println("Shutting down gracefully...")
+		ln.Close()
+		os.Exit(0)
+	}()
 
 	fmt.Println("Message Broker is listening on port", PORT)
 
@@ -78,7 +91,27 @@ func handleCommand(message Message, conn net.Conn, format string) {
 		handleSubscribe(message.Topic, conn, format)
 	case "publish":
 		handlePublish(message.Topic, message.Content)
+	case "unsubscribe":
+		handleUnsubscribe(message.Topic, conn)
 	}
+}
+func handleUnsubscribe(topic string, conn net.Conn) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	subscribers[topic] = removeSubscriber(subscribers[topic], conn)
+	fmt.Printf("Client unsubscribed from topic \"%s\"\n", topic)
+
+}
+
+func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
+	for i, sub := range subs {
+		if sub.Conn == conn {
+			return append(subs[:i], subs[i+1:]...)
+		}
+	}
+	return subs
+
 }
 
 func handleSubscribe(topic string, conn net.Conn, format string) {
