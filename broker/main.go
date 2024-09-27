@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const PORT = ":65432"
@@ -26,6 +27,7 @@ type Subscriber struct {
 
 var subscribers = make(map[string][]Subscriber)
 var mu sync.Mutex
+var shutdown = false
 
 func main() {
 	ln, err := net.Listen("tcp", PORT)
@@ -41,6 +43,8 @@ func main() {
 	go func() {
 		<-signalChan
 		fmt.Println("Shutting down gracefully...")
+		shutdown = true
+		time.Sleep(1 * time.Second) // Give time for active connections to finish
 		ln.Close()
 		os.Exit(0)
 	}()
@@ -50,6 +54,10 @@ func main() {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if shutdown {
+				fmt.Println("Server shutting down, no longer accepting connections.")
+				return
+			}
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
@@ -95,6 +103,7 @@ func handleCommand(message Message, conn net.Conn, format string) {
 		handleUnsubscribe(message.Topic, conn)
 	}
 }
+
 func handleUnsubscribe(topic string, conn net.Conn) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -104,7 +113,7 @@ func handleUnsubscribe(topic string, conn net.Conn) {
 }
 
 func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
-	var updatedSubs []Subscriber // to remove not only first occurence but all of them
+	var updatedSubs []Subscriber
 	for _, sub := range subs {
 		if sub.Conn != conn {
 			updatedSubs = append(updatedSubs, sub)
@@ -131,7 +140,6 @@ func handlePublish(topic, content string) {
 		var err error
 		var data []byte
 
-		// Convert the message to the subscriber's preferred format (detected on trying to parse)
 		if sub.Format == "json" {
 			data, err = json.Marshal(message)
 		} else if sub.Format == "xml" {
