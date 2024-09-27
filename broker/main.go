@@ -26,6 +26,7 @@ type Subscriber struct {
 }
 
 var subscribers = make(map[string][]Subscriber)
+var messages = make(map[string][]Message)
 var mu sync.Mutex
 var shutdown = false
 
@@ -128,6 +129,21 @@ func handleSubscribe(topic string, conn net.Conn, format string) {
 
 	subscribers[topic] = append(subscribers[topic], Subscriber{Conn: conn, Format: format})
 	fmt.Printf("Client subscribed to topic \"%s\" with format \"%s\"\n", topic, format)
+
+	for _, msg := range messages[topic] {
+		var err error
+		var data []byte
+
+		if format == "json" {
+			data, err = json.Marshal(msg)
+		} else if format == "xml" {
+			data, err = xml.Marshal(msg)
+		}
+
+		if err == nil {
+			conn.Write(data)
+		}
+	}
 }
 
 func handlePublish(topic, content string) {
@@ -135,6 +151,7 @@ func handlePublish(topic, content string) {
 	defer mu.Unlock()
 
 	message := Message{Command: "publish", Topic: topic, Content: content}
+	messages[topic] = append(messages[topic], message)
 
 	for _, sub := range subscribers[topic] {
 		var err error
