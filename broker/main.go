@@ -2,24 +2,27 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 )
 
-const (
-	PORT = ":65432"
-)
+const PORT = ":65432"
 
 type Message struct {
+	Command string `json:"command" xml:"command"`
 	Topic   string `json:"topic" xml:"topic"`
 	Content string `json:"content" xml:"content"`
 }
 
-var subscribers = make(map[string][]net.Conn) // Key: topic name, Value: slice of connections
-var messageBuffer = make(map[string][]string) // Buffer for messages per topic
-var mu sync.Mutex                             // Mutex for thread-safe access to messageBuffer
+type Subscriber struct {
+	Conn   net.Conn
+	Format string
+}
+
+var subscribers = make(map[string][]Subscriber)
+var mu sync.Mutex
 
 func main() {
 	ln, err := net.Listen("tcp", PORT)
@@ -27,11 +30,10 @@ func main() {
 		fmt.Println("Error starting server:", err)
 		return
 	}
-	defer ln.Close() // Ensure the listener is closed when exiting main
+	defer ln.Close()
 
-	fmt.Println("Message Broker is listining on port", PORT)
+	fmt.Println("Message Broker is listening on port", PORT)
 
-	// Main loop for incoming conns
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -43,69 +45,70 @@ func main() {
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close() // Ensure conn close on func exit
+	defer conn.Close()
+
 	buffer := make([]byte, 1024)
 	n, err := conn.Read(buffer)
 	if err != nil {
-		fmt.Println("Error readin from connection:", err)
+		fmt.Println("Error reading from connection:", err)
 		return
 	}
 
-	message := string(buffer[:n])            // Converting bytes read to a string
-	parts := strings.SplitN(message, ":", 3) // Splits message in parts by ":"
-
-	if len(parts) < 2 { // if the content part is missing
-		return // Not enough parts
+	var message Message
+	// Try to unmarshal the message as JSON
+	if err := json.Unmarshal(buffer[:n], &message); err == nil {
+		fmt.Println("Parsed message as JSON")
+		handleCommand(message, conn, "json")
+		return
 	}
 
-	// Handling command from sender
-	cmd, topic, content := parts[0], parts[1], ""
-	if len(parts) == 3 {
-		content = parts[2] // if the contntent/message is present
+	// Try to unmarshal the message as XML
+	if err := xml.Unmarshal(buffer[:n], &message); err == nil {
+		fmt.Println("Parsed message as XML")
+		handleCommand(message, conn, "xml")
+		return
 	}
 
-	switch cmd {
-	case "publish":
-		publishMessage(topic, content)
-	case "subscribe":
-		subscribe(topic, conn)
-	}
-
+	fmt.Println("Failed to parse message")
 }
 
-func publishMessage(topic, content string) {
+func handleCommand(message Message, conn net.Conn, format string) {
+	switch message.Command {
+	case "subscribe":
+		handleSubscribe(message.Topic, conn, format)
+	case "publish":
+		handlePublish(message.Topic, message.Content)
+	}
+}
+
+func handleSubscribe(topic string, conn net.Conn, format string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	message := Message{Topic: topic, Content: content}
-	jsonData, _ := json.Marshal(message)
+	subscribers[topic] = append(subscribers[topic], Subscriber{Conn: conn, Format: format})
+	fmt.Printf("Client subscribed to topic \"%s\" with format \"%s\"\n", topic, format)
+}
 
-	// Store the message in the buffer
-	messageBuffer[topic] = append(messageBuffer[topic], content)
+func handlePublish(topic, content string) {
+	mu.Lock()
+	defer mu.Unlock()
 
-	// if there are subscribers for topic, send them mesage
-	if conns, found := subscribers[topic]; found {
-		for _, subConn := range conns { // for each sub conn
-			subConn.Write(jsonData)
+	message := Message{Command: "publish", Topic: topic, Content: content}
+
+	for _, sub := range subscribers[topic] {
+		var err error
+		var data []byte
+
+		// Convert the message to the subscriber's preferred format (detected on trying to parse)
+		if sub.Format == "json" {
+			data, err = json.Marshal(message)
+		} else if sub.Format == "xml" {
+			data, err = xml.Marshal(message)
+		}
+
+		if err == nil {
+			sub.Conn.Write(data)
 		}
 	}
 	fmt.Printf("Published to topic \"%s\": %s\n", topic, content)
-}
-
-func subscribe(topic string, conn net.Conn) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	subscribers[topic] = append(subscribers[topic], conn)
-	fmt.Printf("Subscribed to topic \"%s\"\n", topic)
-
-	// If any buffered messages for topic
-	if messages, found := messageBuffer[topic]; found {
-		for _, msg := range messages { // send the message
-			msgData := Message{Topic: topic, Content: msg}
-			jsonData, _ := json.Marshal(msgData)
-			conn.Write(jsonData)
-		}
-		delete(messageBuffer, topic) // clear buffer after send
-	}
 }
