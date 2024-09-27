@@ -10,7 +10,16 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.venv/
+env/
 
 # C#
 bin/
 obj/
+*.sln
+*.user
+*.csproj
+*.dll
+*.exe
