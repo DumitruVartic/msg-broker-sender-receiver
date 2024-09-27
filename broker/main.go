@@ -82,7 +82,7 @@ func handleConnection(conn net.Conn) {
 	}
 
 	var metadata MessageMetadata
-	format, err := unmarshalMessage(buffer[:n], &metadata)
+	format, err := determineMessageFormat(buffer[:n], &metadata)
 	if err != nil {
 		fmt.Println("Failed to parse message:", err)
 		return
@@ -96,8 +96,8 @@ func handleConnection(conn net.Conn) {
 	handleCommand(metadata, conn)
 }
 
-func unmarshalMessage(data []byte, metadata *MessageMetadata) (string, error) {
-	if err := json.Unmarshal(data, metadata); err == nil {
+func determineMessageFormat(data []byte, metadata *MessageMetadata) (string, error) {
+	if json.Valid(data) {
 		return "json", nil
 	}
 	if err := xml.Unmarshal(data, metadata); err == nil {
