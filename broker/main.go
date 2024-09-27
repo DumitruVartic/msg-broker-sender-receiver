@@ -15,9 +15,14 @@ import (
 const PORT = ":65432"
 
 type Message struct {
+	Content string `json:"content" xml:"content"`
+}
+
+type MessageMetadata struct {
+	Message Message
 	Command string `json:"command" xml:"command"`
 	Topic   string `json:"topic" xml:"topic"`
-	Content string `json:"content" xml:"content"`
+	Format  string
 }
 
 type Subscriber struct {
@@ -26,7 +31,7 @@ type Subscriber struct {
 }
 
 var subscribers = make(map[string][]Subscriber)
-var messages = make(map[string][]Message)
+var messages = make(map[string][]Message) // Storing messages by topic
 var mu sync.Mutex
 var shutdown = false
 
@@ -45,7 +50,7 @@ func main() {
 		<-signalChan
 		fmt.Println("Shutting down gracefully...")
 		shutdown = true
-		time.Sleep(1 * time.Second) // Give time for active connections to finish
+		time.Sleep(1 * time.Second)
 		ln.Close()
 		os.Exit(0)
 	}()
@@ -76,32 +81,40 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	var message Message
-	// Try to unmarshal the message as JSON
-	if err := json.Unmarshal(buffer[:n], &message); err == nil {
-		fmt.Println("Parsed message as JSON")
-		handleCommand(message, conn, "json")
+	var metadata MessageMetadata
+	format, err := unmarshalMessage(buffer[:n], &metadata)
+	if err != nil {
+		fmt.Println("Failed to parse message:", err)
 		return
 	}
 
-	// Try to unmarshal the message as XML
-	if err := xml.Unmarshal(buffer[:n], &message); err == nil {
-		fmt.Println("Parsed message as XML")
-		handleCommand(message, conn, "xml")
-		return
-	}
+	metadata.Format = format
 
-	fmt.Println("Failed to parse message")
+	fmt.Printf("Parsed message as %s\n", metadata.Format)
+	fmt.Printf("Message %s\n", metadata.Message.Content)
+	fmt.Printf("Meta %s\n", metadata)
+	handleCommand(metadata, conn)
 }
 
-func handleCommand(message Message, conn net.Conn, format string) {
-	switch message.Command {
+func unmarshalMessage(data []byte, metadata *MessageMetadata) (string, error) {
+	if err := json.Unmarshal(data, metadata); err == nil {
+		return "json", nil
+	}
+	if err := xml.Unmarshal(data, metadata); err == nil {
+		return "xml", nil
+	}
+
+	return "", fmt.Errorf("message could not be parsed as JSON or XML")
+}
+
+func handleCommand(metadata MessageMetadata, conn net.Conn) {
+	switch metadata.Command {
 	case "subscribe":
-		handleSubscribe(message.Topic, conn, format)
+		handleSubscribe(metadata.Topic, conn, metadata.Format)
 	case "publish":
-		handlePublish(message.Topic, message.Content)
+		handlePublish(metadata.Topic, metadata.Message.Content) // Use the content of the Message
 	case "unsubscribe":
-		handleUnsubscribe(message.Topic, conn)
+		handleUnsubscribe(metadata.Topic, conn)
 	}
 }
 
@@ -123,7 +136,8 @@ func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
 	return updatedSubs
 }
 
-func marshalMessage(message Message, format string) ([]byte, error) {
+func marshalMessage(content string, format string) ([]byte, error) {
+	message := Message{Content: content}
 	if format == "json" {
 		return json.Marshal(message)
 	} else if format == "xml" {
@@ -140,7 +154,7 @@ func handleSubscribe(topic string, conn net.Conn, format string) {
 	fmt.Printf("Client subscribed to topic \"%s\" with format \"%s\"\n", topic, format)
 
 	for _, msg := range messages[topic] {
-		if data, err := marshalMessage(msg, format); err == nil {
+		if data, err := marshalMessage(msg.Content, format); err == nil {
 			conn.Write(data)
 		}
 	}
@@ -150,11 +164,10 @@ func handlePublish(topic, content string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	message := Message{Command: "publish", Topic: topic, Content: content}
-	messages[topic] = append(messages[topic], message)
+	messages[topic] = append(messages[topic], Message{Content: content})
 
 	for _, sub := range subscribers[topic] {
-		if data, err := marshalMessage(message, sub.Format); err == nil {
+		if data, err := marshalMessage(content, sub.Format); err == nil {
 			sub.Conn.Write(data)
 		}
 	}
