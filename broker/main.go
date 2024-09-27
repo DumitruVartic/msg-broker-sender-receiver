@@ -123,6 +123,15 @@ func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
 	return updatedSubs
 }
 
+func marshalMessage(message Message, format string) ([]byte, error) {
+	if format == "json" {
+		return json.Marshal(message)
+	} else if format == "xml" {
+		return xml.Marshal(message)
+	}
+	return nil, fmt.Errorf("unsupported format: %s", format)
+}
+
 func handleSubscribe(topic string, conn net.Conn, format string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -131,16 +140,7 @@ func handleSubscribe(topic string, conn net.Conn, format string) {
 	fmt.Printf("Client subscribed to topic \"%s\" with format \"%s\"\n", topic, format)
 
 	for _, msg := range messages[topic] {
-		var err error
-		var data []byte
-
-		if format == "json" {
-			data, err = json.Marshal(msg)
-		} else if format == "xml" {
-			data, err = xml.Marshal(msg)
-		}
-
-		if err == nil {
+		if data, err := marshalMessage(msg, format); err == nil {
 			conn.Write(data)
 		}
 	}
@@ -154,16 +154,7 @@ func handlePublish(topic, content string) {
 	messages[topic] = append(messages[topic], message)
 
 	for _, sub := range subscribers[topic] {
-		var err error
-		var data []byte
-
-		if sub.Format == "json" {
-			data, err = json.Marshal(message)
-		} else if sub.Format == "xml" {
-			data, err = xml.Marshal(message)
-		}
-
-		if err == nil {
+		if data, err := marshalMessage(message, sub.Format); err == nil {
 			sub.Conn.Write(data)
 		}
 	}
