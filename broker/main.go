@@ -101,17 +101,16 @@ func handleUnsubscribe(topic string, conn net.Conn) {
 
 	subscribers[topic] = removeSubscriber(subscribers[topic], conn)
 	fmt.Printf("Client unsubscribed from topic \"%s\"\n", topic)
-
 }
 
 func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
-	for i, sub := range subs {
-		if sub.Conn == conn {
-			return append(subs[:i], subs[i+1:]...)
+	var updatedSubs []Subscriber // to remove not only first occurence but all of them
+	for _, sub := range subs {
+		if sub.Conn != conn {
+			updatedSubs = append(updatedSubs, sub)
 		}
 	}
-	return subs
-
+	return updatedSubs
 }
 
 func handleSubscribe(topic string, conn net.Conn, format string) {
