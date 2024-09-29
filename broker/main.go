@@ -15,13 +15,13 @@ import (
 const PORT = ":65432"
 
 type Message struct {
-	Content string `json:"content" xml:"content"`
+	Content string `json:"content" xml:"Content"`
 }
 
 type MessageMetadata struct {
-	Message Message
-	Command string `json:"command" xml:"command"`
-	Topic   string `json:"topic" xml:"topic"`
+	Message Message `json:"message" xml:"Message"`
+	Command string  `json:"command" xml:"Command"`
+	Topic   string  `json:"topic" xml:"Topic"`
 	Format  string
 }
 
@@ -98,8 +98,12 @@ func handleConnection(conn net.Conn) {
 
 func determineMessageFormat(data []byte, metadata *MessageMetadata) (string, error) {
 	if json.Valid(data) {
+		if err := json.Unmarshal(data, metadata); err != nil {
+			return "", fmt.Errorf("failed to unmarshal JSON: %w", err)
+		}
 		return "json", nil
 	}
+
 	if err := xml.Unmarshal(data, metadata); err == nil {
 		return "xml", nil
 	}
