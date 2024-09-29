@@ -1,4 +1,5 @@
 import socket
+import argparse
 
 HOST = 'localhost'
 PORT = 65432
@@ -19,6 +20,8 @@ def subscribe_to_topic(topic):
             print(f'Received from topic "{topic}": {data.decode()}')
 
 if __name__ == "__main__":
-    topic = input("Enter topic to subscribe to: ")
-    subscribe_to_topic(topic)
+    parser = argparse.ArgumentParser(description='Subscribe to a topic.')
+    parser.add_argument('topic', help='The topic to subscribe to')
+    args = parser.parse_args()
+    subscribe_to_topic(args.topic)
 
