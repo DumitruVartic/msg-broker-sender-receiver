@@ -6,37 +6,24 @@ import xml.etree.ElementTree as ET
 HOST = 'localhost'
 PORT = 65432
 
-def format_message(topic, content, output_format):
-    if output_format == 'json':
+def create_message(message_type, topic, content=None:
+    if message_type == 'json':
         message = {
             "topic": topic,
-            "content": content
+            "content": content if content else None
         }
-        return json.dumps(message, indent=4)
-    
-    elif output_format == 'xml':
-        message = ET.Element("Message")
-        topic_element = ET.SubElement(message, "Topic")
-        topic_element.text = topic
-        content_element = ET.SubElement(message, "Content")
-        content_element.text = content
-        return ET.tostring(message, encoding="unicode", method="xml")
+        return json.dumps(message, indent=4) if content else json.dumps({"command": "subscribe", "topic": topic})
 
-def create_subscribe_message(topic, output_format):
-    if output_format == 'json':
-        subscribe_message = {
-            "command": "subscribe",
-            "topic": topic
-        }
-        return json.dumps(subscribe_message)
-    
-    elif output_format == 'xml':
-        message = ET.Element("message")
-        command_element = ET.SubElement(message, "command")
-        command_element.text = "subscribe"
-        topic_element = ET.SubElement(message, "topic")
-        topic_element.text = topic
-        return ET.tostring(message, encoding="unicode", method="xml")
+    elif message_type == 'Xml':
+        message_element = ET.Element("Message" if content else "message")
+        if content:
+            ET.SubElement(message_element, "Topic").text = topic
+            ET.SubElement(message_element, "Content").text = content
+        else:
+            ET.SubElement(message_element, "command").text = "subscribe"
+            ET.SubElement(message_element, "topic").text = topic
+        return ET.tostring(message_element, encoding="unicode")
+)
 
 def subscribe_to_topic(topic, output_format):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
