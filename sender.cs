@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using System.Xml.Serialization;
+using System.IO;
 
 class Program
 {
@@ -9,27 +12,93 @@ class Program
 
     static void Main(string[] args)
     {
-        Console.Write("Enter topic to publish to: ");
-        string topic = Console.ReadLine();
-        
-        Console.Write("Enter message to publish: ");
-        string message = Console.ReadLine();
+        // Validate that both topic and message are provided and not empty
+        if (args.Length < 2 || string.IsNullOrWhiteSpace(args[0]) || string.IsNullOrWhiteSpace(args[1]))
+        {
+            Console.WriteLine("Usage: Program <topic> <message> [--format=json|xml]");
+            Console.WriteLine("Both topic and message must be provided and not be empty.");
+            return;
+        }
 
-        PublishToTopic(topic, message);
+        // Get the topic and message from command-line arguments
+        string topic = args[0];
+        string message = args[1];
+
+        // Default to JSON format if format is not specified
+        string format = "json";
+        if (args.Length >= 3 && args[2].StartsWith("--format="))
+        {
+            format = args[2].Split('=')[1].ToLower();
+        }
+
+        // Validate the format
+        if (format != "json" && format != "xml")
+        {
+            Console.WriteLine("Invalid format. Supported formats are json and xml.");
+            return;
+        }
+
+        // Publish to the topic with the selected format
+        PublishToTopic(topic, message, format);
     }
 
-    static void PublishToTopic(string topic, string message)
+    static void PublishToTopic(string topic, string message, string format)
     {
-        using (TcpClient client = new TcpClient(HOST, PORT))
-        using (NetworkStream stream = client.GetStream())
+        // Create the publish message object
+        var publishMessage = new PublishMessage
         {
-            // Create the publish message
-            string publishMessage = $"publish:{topic}:{message}";
-            byte[] data = Encoding.UTF8.GetBytes(publishMessage);
+            Command = "publish",
+            Topic = topic,
+            Message = new MessageContent { Content = message }
+        };
 
-            // Send the publish message to the broker
-            stream.Write(data, 0, data.Length);
-            Console.WriteLine($"Sent to topic \"{topic}\": {message}");
+        // Serialize the publish message based on the format
+        string serializedMessage = format == "json" ? SerializeToJson(publishMessage) : SerializeToXml(publishMessage);
+
+        // Send the message
+        try
+        {
+            using (TcpClient client = new TcpClient(HOST, PORT))
+            using (NetworkStream stream = client.GetStream())
+            {
+                byte[] data = Encoding.UTF8.GetBytes(serializedMessage);
+
+                // Send the publish message to the broker
+                stream.Write(data, 0, data.Length);
+                Console.WriteLine($"Sent to topic \"{topic}\" in {format.ToUpper()} format: {message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
         }
     }
+
+    static string SerializeToJson(PublishMessage message)
+    {
+        return JsonSerializer.Serialize(message, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    static string SerializeToXml(PublishMessage message)
+    {
+        var xmlSerializer = new XmlSerializer(typeof(PublishMessage));
+        using (var stringWriter = new StringWriter())
+        {
+            xmlSerializer.Serialize(stringWriter, message);
+            return stringWriter.ToString();
+        }
+    }
+}
+
+// Define a class for the publish message
+public class PublishMessage
+{
+    public string Command { get; set; }
+    public string Topic { get; set; }
+    public MessageContent Message { get; set; }
+}
+
+public class MessageContent
+{
+    public string Content { get; set; }
 }
