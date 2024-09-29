@@ -1,0 +1,25 @@
+# Ignore the entire .idea folder (JetBrains IDE settings)
+.idea/
+
+# Go
+/bin/
+/pkg/
+*.exe
+*.out
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+
+# C#
+bin/
+obj/
+*.sln
+*.user
+*.csproj
+*.dll
+*.exe
