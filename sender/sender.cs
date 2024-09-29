@@ -82,9 +82,20 @@ class Program
     static string SerializeToXml(PublishMessage message)
     {
         var xmlSerializer = new XmlSerializer(typeof(PublishMessage));
-        using (var stringWriter = new StringWriter())
+        var xmlSettings = new XmlWriterSettings
         {
-            xmlSerializer.Serialize(stringWriter, message);
+            Indent = true,
+            Encoding = new UTF8Encoding(false), // Force UTF-8 without BOM
+            OmitXmlDeclaration = true           // Remove XML declaration
+        };
+
+        var ns = new XmlSerializerNamespaces();
+        ns.Add("", ""); // Remove namespaces
+
+        using (var stringWriter = new StringWriter())
+        using (var xmlWriter = XmlWriter.Create(stringWriter, xmlSettings))
+        {
+            xmlSerializer.Serialize(xmlWriter, message, ns);
             return stringWriter.ToString();
         }
     }
