@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package broker;
+
+option go_package = "message_broker/broker;broker";
+
+// Define the Message structure
+message Message {
+    string content = 1;
+}
+
+// Define the metadata for the messages
+message MessageMetadata {
+    Message message = 1;
+    string command = 2;
+    string topic = 3;
+}
+
+// Define the service for the Message Broker
+service MessageBroker {
+    rpc Publish (MessageMetadata) returns (Response);
+    rpc Subscribe (TopicRequest) returns (stream Message);
+    rpc Unsubscribe (TopicRequest) returns (Response);
+}
+
+message TopicRequest {
+    string topic = 1;
+}
+
+message Response {
+    bool success = 1;
+    string message = 2; // Additional information
+}
