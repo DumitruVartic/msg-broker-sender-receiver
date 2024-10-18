@@ -35,3 +35,16 @@ make proto
 ```
 
 This target compiles the protobuf files for Go, C#, and Python.
+
+### Troubleshoting go
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+echo $PATH
+export PATH=$PATH:$(go env GOPATH)/bin
+source ~/.bashrc
+protoc-gen-go --version
+protoc-gen-go-grpc --version
+make proto
+```
