@@ -50,11 +50,10 @@ python-requirements: venv
 	source .venv/bin/activate && pip install -r receiver/requirements.txt
 	@echo "Python dependencies installed."
 
-# Compile protobuf files (the go part(after export) is linux only)
+# Compile protobuf files (the go part(after export) is linux only), and c# generates them on build
 proto:
 	@echo "Compiling protobuf files..."
-	protoc --csharp_out=sender proto/message_broker.proto
-	protoc --python_out=receiver proto/message_broker.proto
+	python -m grpc_tools.protoc --python_out=receiver --grpc_python_out=receiver -Iproto proto/message_broker.proto
 	@export PATH=$PATH:$(go env GOPATH)/bin
 	@source ~/.bashrc
 	protoc --go_out=broker --go-grpc_out=broker proto/message_broker.proto

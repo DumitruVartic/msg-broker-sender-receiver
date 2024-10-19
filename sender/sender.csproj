@@ -10,11 +10,12 @@
   <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.21.12" />
     <PackageReference Include="Grpc.Net.Client" Version="2.56.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.56.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.56.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\proto\message_broker.proto" GrpcServices="Client" />
+    <!-- This will generate C# client and server code based on the proto file -->
+    <Protobuf Include="..\proto\message_broker.proto" GrpcServices="Both" />
   </ItemGroup>
 
 </Project>
