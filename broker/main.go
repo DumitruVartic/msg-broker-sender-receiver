@@ -1,179 +1,92 @@
 package main
 
 import (
-	"encoding/json"
-	"encoding/xml"
-	"fmt"
+	"context"
+	"log"
 	"net"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
-	"time"
+
+	pb "message_broker/proto"
+
+	"google.golang.org/grpc"
 )
 
 const PORT = ":65432"
 
-type Message struct {
-	Content string `json:"content" xml:"Content"`
+type server struct {
+	pb.UnimplementedMessageBrokerServer
 }
 
-type MessageMetadata struct {
-	Message Message `json:"message" xml:"Message"`
-	Command string  `json:"command" xml:"Command"`
-	Topic   string  `json:"topic" xml:"Topic"`
-	Format  string
-}
-
-type Subscriber struct {
-	Conn   net.Conn
-	Format string
-}
-
-var subscribers = make(map[string][]Subscriber)
-var messages = make(map[string][]Message) // Storing messages by topic
+var subscribers = make(map[string][]chan *pb.Message) // Map of topic to a list of channels
 var mu sync.Mutex
-var shutdown = false
 
-func main() {
-	ln, err := net.Listen("tcp", PORT)
-	if err != nil {
-		fmt.Println("Error starting server:", err)
-		return
+func (s *server) Publish(ctx context.Context, metadata *pb.MessageMetadata) (*pb.Response, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	topic := metadata.Topic
+	message := metadata.Message.Content
+
+	// Broadcast
+	for _, sub := range subscribers[topic] {
+		sub <- &pb.Message{Content: message} // Send to the channel
 	}
-	defer ln.Close()
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	return &pb.Response{Success: true, Message: "Message published"}, nil
+}
 
-	go func() {
-		<-signalChan
-		fmt.Println("Shutting down gracefully...")
-		shutdown = true
-		time.Sleep(1 * time.Second)
-		ln.Close()
-		os.Exit(0)
+func (s *server) Subscribe(req *pb.TopicRequest, stream pb.MessageBroker_SubscribeServer) error {
+	topic := req.Topic
+	mu.Lock()
+	ch := make(chan *pb.Message)
+	subscribers[topic] = append(subscribers[topic], ch) // Add subscriber
+	mu.Unlock()
+
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		// Remove subscriber when done
+		for i, sub := range subscribers[topic] {
+			if sub == ch {
+				subscribers[topic] = append(subscribers[topic][:i], subscribers[topic][i+1:]...)
+				break
+			}
+		}
 	}()
 
-	fmt.Println("Message Broker is listening on port", PORT)
-
+	// Wait for messages and send them to the stream
 	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			if shutdown {
-				fmt.Println("Server shutting down, no longer accepting connections.")
-				return
-			}
-			fmt.Println("Error accepting connection:", err)
-			continue
+		msg := <-ch // Wait for a message
+		if err := stream.Send(msg); err != nil {
+			return err
 		}
-		go handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
+func (s *server) Unsubscribe(ctx context.Context, req *pb.TopicRequest) (*pb.Response, error) {
+	mu.Lock()
+	defer mu.Unlock()
 
-	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
+	topic := req.Topic
+	if _, exists := subscribers[topic]; exists {
+		delete(subscribers, topic)
+		return &pb.Response{Success: true, Message: "Unsubscribed from topic"}, nil
+	}
+
+	return &pb.Response{Success: false, Message: "Topic not found"}, nil
+}
+
+func main() {
+	lis, err := net.Listen("tcp", PORT)
 	if err != nil {
-		fmt.Println("Error reading from connection:", err)
-		return
+		log.Fatalf("failed to listen: %v", err)
 	}
 
-	var metadata MessageMetadata
-	format, err := determineMessageFormat(buffer[:n], &metadata)
-	if err != nil {
-		fmt.Println("Failed to parse message:", err)
-		return
+	grpcServer := grpc.NewServer()
+	pb.RegisterMessageBrokerServer(grpcServer, &server{})
+
+	log.Printf("Server is listening on port %s...", PORT)
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
 	}
-
-	metadata.Format = format
-
-	fmt.Printf("Parsed message as %s\n", metadata.Format)
-	fmt.Printf("Message %s\n", metadata.Message.Content)
-	fmt.Printf("Meta %s\n", metadata)
-	handleCommand(metadata, conn)
-}
-
-func determineMessageFormat(data []byte, metadata *MessageMetadata) (string, error) {
-	if json.Valid(data) {
-		if err := json.Unmarshal(data, metadata); err != nil {
-			return "", fmt.Errorf("failed to unmarshal JSON: %w", err)
-		}
-		return "json", nil
-	}
-
-	if err := xml.Unmarshal(data, metadata); err == nil {
-		return "xml", nil
-	}
-
-	return "", fmt.Errorf("message could not be parsed as JSON or XML")
-}
-
-func handleCommand(metadata MessageMetadata, conn net.Conn) {
-	switch metadata.Command {
-	case "subscribe":
-		handleSubscribe(metadata.Topic, conn, metadata.Format)
-	case "publish":
-		handlePublish(metadata.Topic, metadata.Message.Content) // Use the content of the Message
-	case "unsubscribe":
-		handleUnsubscribe(metadata.Topic, conn)
-	}
-}
-
-func handleUnsubscribe(topic string, conn net.Conn) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	subscribers[topic] = removeSubscriber(subscribers[topic], conn)
-	fmt.Printf("Client unsubscribed from topic \"%s\"\n", topic)
-}
-
-func removeSubscriber(subs []Subscriber, conn net.Conn) []Subscriber {
-	var updatedSubs []Subscriber
-	for _, sub := range subs {
-		if sub.Conn != conn {
-			updatedSubs = append(updatedSubs, sub)
-		}
-	}
-	return updatedSubs
-}
-
-func marshalMessage(content string, format string) ([]byte, error) {
-	message := Message{Content: content}
-	if format == "json" {
-		return json.Marshal(message)
-	} else if format == "xml" {
-		return xml.Marshal(message)
-	}
-	return nil, fmt.Errorf("unsupported format: %s", format)
-}
-
-func handleSubscribe(topic string, conn net.Conn, format string) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	subscribers[topic] = append(subscribers[topic], Subscriber{Conn: conn, Format: format})
-	fmt.Printf("Client subscribed to topic \"%s\" with format \"%s\"\n", topic, format)
-
-	for _, msg := range messages[topic] {
-		if data, err := marshalMessage(msg.Content, format); err == nil {
-			conn.Write(data)
-		}
-	}
-}
-
-func handlePublish(topic, content string) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	messages[topic] = append(messages[topic], Message{Content: content})
-
-	for _, sub := range subscribers[topic] {
-		if data, err := marshalMessage(content, sub.Format); err == nil {
-			sub.Conn.Write(data)
-		}
-	}
-	fmt.Printf("Published to topic \"%s\": %s\n", topic, content)
 }

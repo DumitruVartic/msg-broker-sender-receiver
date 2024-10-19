@@ -4,13 +4,13 @@
 all: run-broker run-sender run-receiver
 
 run-broker:
-	go run broker/main.go
+	@cd broker && go run main.go
 
 run-sender:
-	cd sender && dotnet run
+	@cd sender && dotnet run
 
 run-receiver:
-	python3 receiver/receiver.py
+	@python3 receiver/receiver.py
 
 # Clean build artifacts (if applicable)
 clean:
