@@ -1,6 +1,11 @@
-# Ignore the entire .idea folder (JetBrains IDE settings)
+# Ignore the specific conf folders
 .idea/
 .vscode/
+
+# Ignore generated proto files
+broker/proto/
+receiver/message_broker_pb2.py
+receiver/message_broker_pb2_grpc.py
 
 # Go
 /bin/
