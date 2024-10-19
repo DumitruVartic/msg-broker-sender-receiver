@@ -17,8 +17,10 @@ type server struct {
 	pb.UnimplementedMessageBrokerServer
 }
 
-var subscribers = make(map[string][]chan *pb.Message) // Map of topic to a list of channels
-var mu sync.Mutex
+var (
+	subscribers = make(map[string][]chan *pb.Message) // Map of topic to a list of channels
+	mu          sync.Mutex
+)
 
 func (s *server) Publish(ctx context.Context, metadata *pb.MessageMetadata) (*pb.Response, error) {
 	mu.Lock()
@@ -26,10 +28,11 @@ func (s *server) Publish(ctx context.Context, metadata *pb.MessageMetadata) (*pb
 
 	topic := metadata.Topic
 	message := metadata.Message.Content
+	log.Print("Message", message, "Published to topic: ", topic)
 
-	// Broadcast
+	// Broadcast to all subscribers of the topic
 	for _, sub := range subscribers[topic] {
-		sub <- &pb.Message{Content: message} // Send to the channel
+		sub <- &pb.Message{Content: message} // Send the message to the channel
 	}
 
 	return &pb.Response{Success: true, Message: "Message published"}, nil
@@ -38,17 +41,17 @@ func (s *server) Publish(ctx context.Context, metadata *pb.MessageMetadata) (*pb
 func (s *server) Subscribe(req *pb.TopicRequest, stream pb.MessageBroker_SubscribeServer) error {
 	topic := req.Topic
 	mu.Lock()
-	ch := make(chan *pb.Message)
-	subscribers[topic] = append(subscribers[topic], ch) // Add subscriber
+	ch := make(chan *pb.Message)                        // Create a new channel for the subscriber
+	subscribers[topic] = append(subscribers[topic], ch) // Add the subscriber
 	mu.Unlock()
-
+	log.Print("Subscribed to topic", topic)
+	// Ensure we clean up the subscriber on function exit
 	defer func() {
 		mu.Lock()
 		defer mu.Unlock()
-		// Remove subscriber when done
 		for i, sub := range subscribers[topic] {
 			if sub == ch {
-				subscribers[topic] = append(subscribers[topic][:i], subscribers[topic][i+1:]...)
+				subscribers[topic] = append(subscribers[topic][:i], subscribers[topic][i+1:]...) // Remove subscriber
 				break
 			}
 		}
@@ -56,9 +59,12 @@ func (s *server) Subscribe(req *pb.TopicRequest, stream pb.MessageBroker_Subscri
 
 	// Wait for messages and send them to the stream
 	for {
-		msg := <-ch // Wait for a message
+		msg, ok := <-ch // Wait for a message
+		if !ok {
+			return nil // Channel closed
+		}
 		if err := stream.Send(msg); err != nil {
-			return err
+			return err // Stream error
 		}
 	}
 }
