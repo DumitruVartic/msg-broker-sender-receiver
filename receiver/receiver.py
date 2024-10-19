@@ -1,7 +1,9 @@
-import socket
+import grpc
 import argparse
 import json
 import xml.etree.ElementTree as ET
+import message_broker_pb2
+import message_broker_pb2_grpc
 
 HOST = 'localhost'
 PORT = 65432
@@ -27,19 +29,23 @@ def create_message(command, message_type, topic, content=None):
 
 def send_command_to_broker(command, topic, output_format):
     """Handles subscription to a topic and receives messages."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((HOST, PORT))
+    # Establish a gRPC channel
+    with grpc.insecure_channel(f'{HOST}:{PORT}') as channel:
+        stub = message_broker_pb2_grpc.MessageBrokerStub(channel)
 
-        subscribe_message = create_message(command, output_format, topic)
-        client_socket.sendall(subscribe_message.encode())
+        if command == "subscribe":
+            request = message_broker_pb2.TopicRequest(topic=topic)
+            response_iterator = stub.Subscribe(request)
 
-        while True:
-            data = client_socket.recv(1024)
-            if not data:
-                break
-            content = data.decode()
-            formatted_message = create_message(command, output_format, topic, content)
-            print(formatted_message)
+            print(f"Subscribed to topic: {topic}")
+            for message in response_iterator:
+                formatted_message = create_message(command, output_format, topic, message.content)
+                print(formatted_message)
+
+        elif command == "unsubscribe":
+            request = message_broker_pb2.TopicRequest(topic=topic)
+            response = stub.Unsubscribe(request)
+            print(response.message)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Subscribe to a topic.')
