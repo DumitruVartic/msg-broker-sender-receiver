@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package broker;
 
-option go_package = "message_broker/broker;broker";
+option go_package = "/proto;broker";
 
 // Define the Message structure
 message Message {
