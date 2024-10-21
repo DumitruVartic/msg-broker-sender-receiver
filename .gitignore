@@ -3,9 +3,9 @@
 .vscode/
 
 # Ignore generated proto files
-broker/proto/
-receiver/message_broker_pb2.py
-receiver/message_broker_pb2_grpc.py
+# broker/proto/
+# receiver/message_broker_pb2.py
+# receiver/message_broker_pb2_grpc.py
 
 # Go
 /bin/
